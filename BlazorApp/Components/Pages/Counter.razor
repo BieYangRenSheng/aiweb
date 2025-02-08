@@ -1,0 +1,145 @@
+﻿@page "/counter"
+@rendermode InteractiveServer
+@using Microsoft.JSInterop
+@using Services
+@using System.Text.Json
+@inject ClickCounterService CounterService
+
+<PageTitle>Counter</PageTitle>
+
+
+<p>
+    <button class="btn btn-primary" @onclick="LoadAndStoreImage">早报</button> 
+</p>
+
+<button class="btn btn-primary" @onclick="LoadData">知乎日报</button>
+
+@if (zhihuResponse == null)
+{
+   
+}
+else
+{
+    <h4>Stories</h4>
+    <ul>
+        @foreach (var item in zhihuResponse.data.stories)
+        {
+            <li>
+                <a href="@item.url" target="_blank">@item.title</a>
+            </li>
+        }
+    </ul>
+
+    <h4>Top Stories</h4>
+    <ul>
+        @foreach (var item in zhihuResponse.data.top_stories)
+        {
+            <li>
+                <a href="@item.url" target="_blank">@item.title</a>
+            </li>
+        }
+    </ul>
+}
+
+@if (!string.IsNullOrEmpty(imageBase64))
+{
+    <div> 
+        <img src="@imageBase64"   class="img-fluid" />
+    </div>
+}
+
+
+@code {
+    // 定义用于反序列化 JSON 的数据模型（这里只需要标题和 URL）
+    public class ZhihuDailyResponse
+    {
+        public string request_id { get; set; }
+        public bool success { get; set; }
+        public string message { get; set; }
+        public int code { get; set; }
+        public ZhihuData data { get; set; }
+        public int time { get; set; }
+        public int usage { get; set; }
+    }
+
+    public class ZhihuData
+    {
+        public string date { get; set; }
+        public List<Story> stories { get; set; }
+        public List<TopStory> top_stories { get; set; }
+    }
+
+    public class Story
+    {
+        public int id { get; set; }
+        public string url { get; set; }
+        public string title { get; set; }
+    }
+
+    public class TopStory
+    {
+        public int id { get; set; }
+        public string url { get; set; }
+        public string title { get; set; }
+    }
+
+    // 用于保存解析后的数据
+    ZhihuDailyResponse zhihuResponse;
+
+
+    private string imageBase64;
+    private string imageUrl = "https://v3.alapi.cn/api/zaobao?token=fEbQfBQsR4inK7G5&format=image";
+
+    private string zhihuUrl = "https://v3.alapi.cn/api/zhihu?token=fEbQfBQsR4inK7G5";
+
+    private bool limitReached = false; // 标记是否达到限制
+
+    protected override void OnInitialized()
+    {
+        // 组件初始化时检查是否已达到限制
+        limitReached = CounterService.GetClickCount() >= CounterService.MaxDailyClicks;
+    }
+    private async Task LoadData(){
+        using var httpClient = new HttpClient();
+        HttpResponseMessage response = await httpClient.GetAsync(zhihuUrl);
+
+        response.EnsureSuccessStatusCode();
+        string json = await response.Content.ReadAsStringAsync();
+
+        // 使用 JsonSerializerOptions 设置不区分大小写（以便属性名称匹配）
+        var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+        zhihuResponse = JsonSerializer.Deserialize<ZhihuDailyResponse>(json, options);
+    }
+
+    private async Task LoadAndStoreImage()
+    {
+        if (CounterService.IncrementClickCount())
+        {
+            using var httpClient = new HttpClient();
+            try
+            {
+                HttpResponseMessage response = await httpClient.GetAsync(imageUrl);
+                response.EnsureSuccessStatusCode();
+                byte[] imageBytes = await response.Content.ReadAsByteArrayAsync();
+                imageBase64 = $"data:image/png;base64,{Convert.ToBase64String(imageBytes)}";
+                StateHasChanged();
+            }
+            catch (HttpRequestException e)
+            {
+                imageBase64 = null;
+                Console.WriteLine($"请求图片失败: {e.Message}");
+            }
+        }
+        else
+        {
+            // 达到限制
+            limitReached = true;
+        }
+       
+    }
+
+ 
+}
